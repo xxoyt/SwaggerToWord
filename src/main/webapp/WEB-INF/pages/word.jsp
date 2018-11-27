@@ -17,7 +17,15 @@
             }
 
             .specialHeight {
-            height: 40px;
+            min-height: 40px;
+            }
+            .responseParam{
+                width: 668px;
+                word-break: break-all;
+                word-spacing: normal;
+                overflow-wrap: break-word;
+                min-height: 40px;
+                overflow: visible;
             }
         </style>
     </head>
@@ -95,7 +103,7 @@
                     </tr>
                     <tr class="specialHeight">
                         <td class="bg">返回值</td>
-                        <td colspan="4">${t.responseParam}</td>
+                        <td colspan="4" ><div class="responseParam">${t.responseParam}</div></td>
                     </tr>
                 </table>
                 <br>

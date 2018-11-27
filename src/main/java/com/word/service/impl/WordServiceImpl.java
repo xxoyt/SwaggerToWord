@@ -5,15 +5,19 @@ import com.word.dto.Response;
 import com.word.dto.Table;
 import com.word.service.WordService;
 import org.apache.commons.lang3.StringUtils;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
+import org.springside.modules.utils.mapper.JsonMapper;
 
 import java.util.*;
 import java.util.List;
+import java.util.regex.Pattern;
 
 /**
  * Created by XiuYin.Cui on 2018/1/12.
@@ -21,10 +25,15 @@ import java.util.List;
 @Service
 public class WordServiceImpl implements WordService {
 
+    Logger log = LoggerFactory.getLogger(WordServiceImpl.class);
+
     @Autowired
     private RestTemplate restTemplate;
     @Value("${swaggerUrl}")
     private String swaggerUrl;
+    @Value("${serviceName}")
+    private String serviceName;
+
 
     @Override
     public List<Table> tableList() {
@@ -32,11 +41,16 @@ public class WordServiceImpl implements WordService {
         List<Table> list = new LinkedList();
         //得到host，并添加上http 或 https
         String host = StringUtils.substringBefore(swaggerUrl, ":") + String.valueOf(map.get("host"));
+        //definitions
+
+        LinkedHashMap<String,LinkedHashMap> definitions =  (LinkedHashMap) map.get("definitions");
+
         //解析paths
         LinkedHashMap<String, LinkedHashMap> paths = (LinkedHashMap) map.get("paths");
         if (paths != null) {
             Iterator<Map.Entry<String, LinkedHashMap>> it = paths.entrySet().iterator();
             while (it.hasNext()) {
+//                if()
                 Table table = new Table();
                 List<Request> requestList = new LinkedList<>();
                 List<Response> responseList = new LinkedList<>();
@@ -53,6 +67,12 @@ public class WordServiceImpl implements WordService {
 
                 Map.Entry<String, LinkedHashMap> path = it.next();
                 url = path.getKey();
+                if(!Pattern.compile("(/api/microPay|/api/facePay).*").matcher(url).find()){
+//                if(!Pattern.compile("(/api/products|/api/external/cashiers).*").matcher(url).find()){
+                    log.info("jump {} ",url);
+                    continue;
+                }
+                url= serviceName+""+url;
 
                 LinkedHashMap<String, LinkedHashMap> value = path.getValue();
                 Set<String> requestTypes = value.keySet();
@@ -65,7 +85,7 @@ public class WordServiceImpl implements WordService {
                 Map.Entry<String, LinkedHashMap> firstRequestType = it2.next();
                 LinkedHashMap content = firstRequestType.getValue();
                 title = String.valueOf(((List) content.get("tags")).get(0));
-                description = String.valueOf(content.get("description"));
+                description = String.valueOf(content.getOrDefault("description","无"));
                 List<String> consumes = (List) content.get("consumes");
                 if (consumes != null && consumes.size() > 0) {
                     for (String consume : consumes) {
@@ -127,11 +147,70 @@ public class WordServiceImpl implements WordService {
                 table.setRequestList(requestList);
                 table.setResponseList(responseList);
                 table.setRequestParam(String.valueOf(paramMap));
-                table.setResponseParam(doRestRequest(restType, buildUrl, paramMap));
+                LinkedHashMap<String,LinkedHashMap> map200= (LinkedHashMap<String, LinkedHashMap>) responses.get("200");
+                log.info(JsonMapper.defaultMapper().toJson(map200));
+                LinkedHashMap<String,Object> mapschema= map200.get("schema");
+                Object $ref = null;
+                String ref = null;
+                if(mapschema==null) {
+                    ref="";
+                }else{
+                    Object typeo = mapschema.get("type");
+                    if (typeo == null) {
+                        ref = "";
+                    } else {
+                        String type = (String) typeo;
+                        if (Objects.equals(type, "string") || Objects.equals(type, "object") || Objects.equals(type, "boolean") || Objects.equals(type, "integer") || Objects.equals(type, "number")) {
+                            ref = type;
+                        } else {
+                            typeo = mapschema.get("type");
+                            if(typeo!=null&&Objects.equals(typeo,"array")){
+                                LinkedHashMap<String, String> mapitems = (LinkedHashMap<String, String>) mapschema.get("items");
+                                $ref = mapitems.get("$ref");
+                                if($ref!=null){
+                                    String name = $ref.toString().replace("#/definitions/","");
+                                    LinkedHashMap<String ,Object> itemsmap = new LinkedHashMap<>();
+                                    itemsmap.put("type",name);
+                                    itemsmap.put("body",loadResponse(definitions,name));
+                                    mapschema.put("items",itemsmap);
+                                }else{
+
+                                }
+                            }else{
+                                $ref=mapschema.get("$ref");
+                                String name = $ref.toString().replace("#/definitions/","");
+                                mapschema.remove("$ref");
+                                mapschema.put("type",name);
+                                mapschema.put("body",loadResponse(definitions,name));
+                            }
+//                        ref = $ref.toString();
+                        }
+                    }
+                }
+                table.setResponseParam(ref!=null?ref:JsonMapper.defaultMapper().toJson(mapschema));
+//                table.setResponseParam(doRestRequest(restType, buildUrl, paramMap));
                 list.add(table);
             }
         }
         return list;
+    }
+
+    private  Object loadVo(Map<String,String> map,LinkedHashMap<String, LinkedHashMap> definitions){
+        Object $ref = map.get("$ref");
+        if($ref==null) return null;
+        String name = $ref.toString().replace("#/definitions/","");
+        map.remove("$ref");
+//        LinkedHashMap<String ,Object> itemsmap = new LinkedHashMap<>();
+        return loadResponse(definitions,name);
+    }
+
+    private Object loadResponse(LinkedHashMap<String, LinkedHashMap> definitions, String replace) {
+        return definitions.get(replace);
+//        if(res!=null){
+//            return JsonMapper.defaultMapper().toJson(res);
+//        }
+//        return "";
+//        return res;
     }
 
     /**
@@ -166,6 +245,7 @@ public class WordServiceImpl implements WordService {
      */
     private String doRestRequest(String restType, String url, Map<String, Object> paramMap) {
         Object object = null;
+        System.out.println(url+"\n\r"+ JsonMapper.defaultMapper().toJson(paramMap));
         try {
             switch (restType) {
                 case "get":
